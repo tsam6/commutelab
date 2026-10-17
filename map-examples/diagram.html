@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CommuteLab map example B: subway diagram</title>
+  <link rel="stylesheet" href="shell.css">
+  <style>
+    #map svg { width: 100%; height: 100%; display: block; }
+    #map text { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="example-data.js"></script>
+  <script src="shell.js"></script>
+  <script>
+    const E = window.EXAMPLE;
+    renderFrame({
+      legend: `<span><i style="background:var(--c-bike)"></i>Bike</span><span><i style="background:var(--c-train)"></i>Train</span>
+               <span><i style="background:var(--c-wait)"></i>Wait</span><span><i class="dash"></i>Still to ride</span>
+               <span><i style="background:var(--label3)"></i>Ruled out</span>`,
+    });
+
+    // ---- layout, generated from the route: stations south -> north, uptown at the top
+    const W = 390, H = 560;
+    const st = E.stations;                       // Astor Pl ... 68 St, from the MTA data
+    const yTop = 84, yBottom = 372;
+    const gap = (yBottom - yTop) / (st.length - 1);
+    const Y = st.map((_, i) => yBottom - i * gap);
+    const xL = 166, xX = 198;                    // local track, express track
+    const iFirstX = st.findIndex((s) => s.express);
+    const iLastX = st.length - 1 - [...st].reverse().findIndex((s) => s.express);
+    const iGC = st.findIndex((s, i) => s.express && i > iFirstX && i < iLastX);
+    const dock = [288, 440], home = [236, 478]; // keep clear of the legend (viewBox y > ~495 sits under it)
+
+    // live position: share of the Grand Central -> 59 St hop already ridden, from the real geometry
+    const hop = hav(st[iGC].pos, st[iLastX].pos);
+    const frac = hav(st[iGC].pos, E.live) / hop;
+    const yLive = Y[iGC] + (Y[iLastX] - Y[iGC]) * frac;
+    const yGhost = Y[iGC] + (Y[iLastX] - Y[iGC]) * Math.max(0, frac - (E.ghostAheadSec * 12.5) / hop);
+
+    const C = { bike: '#2ee59d', wait: '#ffb020', transfer: '#ff7f50', train: '#5b8cff', accent: '#ff5500', lex: '#00933c',
+                dim: '#64748b', label: '#f8fafc', label2: '#a3adbf', canvas: '#0c0e16', sep: 'rgba(255,255,255,0.06)' };
+    const t = (x, y, s, o = {}) => `<text x="${x}" y="${y}" fill="${o.fill || C.label2}" font-size="${o.size || 11}" font-weight="${o.weight || 600}" text-anchor="${o.anchor || 'start'}"${o.ls ? ` letter-spacing="${o.ls}"` : ''}>${s}</text>`;
+    const bullet = (x, y, r) => `<circle cx="${x}" cy="${y}" r="9" fill="${C.lex}"/><text x="${x}" y="${y + 3.6}" fill="#fff" font-size="10.5" font-weight="800" text-anchor="middle">${r}</text>`;
+    const name = (s) => s.name.replace('-', '–');
+
+    let g = '';
+    // faint grid, like CommuteLab's corridor canvas
+    for (let y = 40; y < H; y += 40) g += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="${C.sep}"/>`;
+    for (let x = 30; x < W; x += 40) g += `<line y1="0" y2="${H}" x1="${x}" x2="${x}" stroke="${C.sep}"/>`;
+
+    // tracks
+    g += `<line x1="${xL}" x2="${xL}" y1="${Y[0]}" y2="${Y[st.length - 1]}" stroke="${C.lex}" stroke-width="5" stroke-linecap="round" opacity="0.32"/>`;
+    g += `<line x1="${xX}" x2="${xX}" y1="${Y[iFirstX]}" y2="${Y[iLastX]}" stroke="${C.lex}" stroke-width="5" stroke-linecap="round" opacity="0.32"/>`;
+    g += bullet(xL, Y[st.length - 1] - 30, '6') + bullet(xX + 24, (Y[iGC] + Y[iFirstX]) / 2 - 11, '4') + bullet(xX + 24, (Y[iGC] + Y[iFirstX]) / 2 + 11, '5');
+
+    // ruled out: the longer bike ride to Union Sq (strategy 2)
+    g += `<path d="M${dock[0]},${dock[1]} C${dock[0] + 34},${dock[1] - 52} ${xX + 70},${Y[iFirstX] + 4} ${xX + 9},${Y[iFirstX]}" fill="none" stroke="${C.dim}" stroke-width="2.5" stroke-dasharray="3 4" opacity="0.7"/>`;
+    g += t(382, Y[iFirstX] + 58, 'Bike to Union Sq', { fill: C.dim, size: 10, anchor: 'end' }) + t(382, Y[iFirstX] + 71, 'ruled out', { fill: C.dim, size: 10, anchor: 'end' });
+
+    // ridden: walk, bike, wait, 6 local, transfer, 4/5 express up to you
+    g += `<line x1="${home[0]}" y1="${home[1]}" x2="${dock[0]}" y2="${dock[1]}" stroke="#6c7488" stroke-width="3" stroke-dasharray="3 4" stroke-linecap="round"/>`;
+    g += `<path d="M${dock[0]},${dock[1]} C${dock[0] - 70},${dock[1]} ${xL + 6},${Y[0] + 52} ${xL},${Y[0]}" fill="none" stroke="${C.bike}" stroke-width="5" stroke-linecap="round"/>`;
+    g += `<line x1="${xL}" x2="${xL}" y1="${Y[0]}" y2="${Y[iFirstX]}" stroke="${C.train}" stroke-width="5" stroke-linecap="round"/>`;
+    g += `<line x1="${xX}" x2="${xX}" y1="${Y[iFirstX]}" y2="${yLive}" stroke="${C.train}" stroke-width="5" stroke-linecap="round"/>`;
+    // ahead: rest of the express, then change to the 6 local for one stop
+    g += `<line x1="${xX}" x2="${xX}" y1="${yLive}" y2="${Y[iLastX]}" stroke="${C.accent}" stroke-width="3.5" stroke-dasharray="4 5" stroke-linecap="round"/>`;
+    g += `<line x1="${xL}" x2="${xL}" y1="${Y[iLastX]}" y2="${Y[st.length - 1]}" stroke="${C.accent}" stroke-width="3.5" stroke-dasharray="4 5" stroke-linecap="round"/>`;
+
+    // stations: express stops are pills spanning both tracks; local stops are dots on the 6 track
+    st.forEach((s, i) => {
+      const y = Y[i];
+      const dest = i === st.length - 1;
+      if (s.express) g += `<rect x="${xL - 8}" y="${y - 8}" width="${xX - xL + 16}" height="16" rx="8" fill="${C.label}" stroke="${C.canvas}" stroke-width="2.5"/>`;
+      else if (dest) g += `<circle cx="${xL}" cy="${y}" r="10" fill="${C.accent}" stroke="#fff" stroke-width="3"/>`;
+      else g += `<circle cx="${xL}" cy="${y}" r="5" fill="${C.canvas}" stroke="#e2e8f0" stroke-width="2"/>`;
+      const skipped = !s.express && i > iFirstX && i < iLastX;
+      g += t(xL - 18, y + 4, name(s), { anchor: 'end', size: s.express || dest ? 12 : 11, weight: s.express || dest ? 700 : 600,
+        fill: dest ? '#ff8a4d' : s.express ? C.label : skipped ? '#7d879a' : C.label2 });
+      if (skipped) g += t(xL - 18, y + 16, 'express skips', { anchor: 'end', size: 9, fill: '#5b6477', weight: 600 });
+    });
+    g += t(xL - 18, Y[st.length - 1] + 18, 'Hunter College', { anchor: 'end', size: 10, fill: '#ff8a4d', weight: 600 });
+
+    // phase annotations on the right
+    const tag = (x, y, label, val, color) => t(x, y, `${label} <tspan fill="${C.label}" font-weight="700">${val}</tspan>`, { fill: color, size: 11, weight: 700 });
+    g += tag(xL + 16, Y[0] + 4, 'Wait', fmt(E.phases.wait), C.wait);
+    g += tag(xL + 16, (Y[0] + Y[iFirstX]) / 2 + 4, '6 local', fmt(E.phases.train1), C.train);
+    g += tag(xX + 16, Y[iFirstX] + 4, 'Transfer', fmt(E.phases.transfer), C.transfer);
+    g += tag(xX + 16, yLive + 4, '4/5 express', `${fmt(E.phases.train2)} so far`, C.train);
+    g += tag(xX + 16, Y[iLastX] + 4, 'Off here → 6 local', '1 stop', C.accent);
+    g += t(xL - 18, Y[0] + 50, `<tspan fill="${C.bike}" font-weight="700">Bike</tspan> <tspan fill="${C.label}" font-weight="700">${fmt(E.phases.bike)}</tspan>`, { anchor: 'end', size: 11 });
+    g += t(xL - 18, Y[0] + 64, `${(E.bike.astorMeters / 1000).toFixed(1)} km from the dock`, { anchor: 'end', size: 9.5, fill: '#7d879a' });
+
+    // home + Citi Bike dock
+    g += `<circle cx="${home[0]}" cy="${home[1]}" r="5" fill="${C.label}" stroke="${C.canvas}" stroke-width="2"/>` + t(home[0] - 11, home[1] + 4, 'Home', { fill: C.label, size: 11, anchor: 'end' });
+    g += `<circle cx="${dock[0]}" cy="${dock[1]}" r="7" fill="${C.bike}" stroke="${C.canvas}" stroke-width="2.5"/>` + t(dock[0] + 12, dock[1] + 4, 'Citi Bike', { fill: C.bike, size: 11, weight: 700 }) + t(dock[0] + 12, dock[1] + 17, E.dock.name, { fill: C.label2, size: 9.5 });
+
+    // ghost (typical day, hollow) and you (solid, with halo)
+    g += `<circle cx="${xX}" cy="${yGhost}" r="6.5" fill="none" stroke="${C.label}" stroke-width="2.5" opacity="0.85"/>`;
+    g += `<circle cx="${xX}" cy="${yLive}" r="13" fill="${C.accent}" opacity="0.28"/><circle cx="${xX}" cy="${yLive}" r="6.5" fill="${C.accent}" stroke="#fff" stroke-width="2.5"/>`;
+
+    document.getElementById('map').innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
+    document.title += ' (ready)';
+  </script>
+</body>
+</html>

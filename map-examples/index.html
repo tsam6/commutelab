@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CommuteLab: two map styles</title>
+  <style>
+    body { margin: 0; padding: 24px; background: #05060a; color: #f8fafc; font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    p { margin: 0 0 20px; color: #94a3b8; max-width: 900px; }
+    .row { display: flex; gap: 28px; flex-wrap: wrap; }
+    figure { margin: 0; }
+    figcaption { margin-bottom: 8px; font-weight: 700; }
+    figcaption span { color: #94a3b8; font-weight: 500; }
+    iframe { width: 430px; height: 932px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 28px; background: #090a0f; }
+  </style>
+</head>
+<body>
+  <h1>Two map styles, same commute</h1>
+  <p>Real data: East Village → Hunter College via Citi Bike (E 4 St &amp; Ave B), the 6 local and the 4/5 express on the Lexington Av line.
+     Both show the same moment: you're on the 4/5 express passing 51 St, 42 s ahead of your typical day.</p>
+  <div class="row">
+    <figure><figcaption>A · Street map <span>(drag and zoom it)</span></figcaption><iframe src="street.html" title="Street map example"></iframe></figure>
+    <figure><figcaption>B · Subway diagram</figcaption><iframe src="diagram.html" title="Subway diagram example"></iframe></figure>
+  </div>
+</body>
+</html>

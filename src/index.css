@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid #ff5500;
+  outline-offset: 2px;
+}
+
+/* MapLibre: quiet attribution that collapses to the (i) button, below the floating pills */
+.maplibregl-ctrl-top-right {
+  top: 50px;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+.cl-dark .maplibregl-ctrl-attrib {
+  background: rgba(18, 20, 28, 0.85) !important;
+  color: #94a3b8;
+}
+.cl-dark .maplibregl-ctrl-attrib a {
+  color: #cbd5e1 !important;
+}
+.cl-dark .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+
+/* Live position puck and your typical day's "ghost" */
+.cl-puck {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ff5500;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 9px rgba(255, 85, 0, 0.28);
+}
+.cl-ghost {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(248, 250, 252, 0.9);
+  background: transparent;
+}
+.cl-light .cl-ghost {
+  border-color: rgba(15, 23, 42, 0.75);
+}
+.cl-pin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

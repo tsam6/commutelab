@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CommuteLab map example A: street map</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="shell.css">
+  <style>
+    .maplibregl-ctrl-bottom-right { bottom: 52px; }
+    .maplibregl-ctrl-attrib { background: rgba(18, 20, 28, 0.85) !important; }
+    .maplibregl-ctrl-attrib a { color: var(--label2) !important; }
+    .north { position: absolute; top: 56px; right: 12px; z-index: 5; width: 34px; height: 34px; border-radius: 50%; background: var(--bg2); border: 1px solid var(--sep); display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); pointer-events: none; }
+    .north svg { width: 18px; height: 18px; }
+    .mode { position: absolute; top: 56px; left: 12px; z-index: 5; display: inline-flex; padding: 2px; border-radius: 9999px; background: var(--bg2); border: 1px solid var(--sep); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); }
+    .mode a { padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; color: var(--label2); text-decoration: none; }
+    .mode a.on { background: var(--bg3); color: var(--label); }
+    .map-error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--bad); font-weight: 650; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="example-data.js"></script>
+  <script src="shell.js"></script>
+  <script>
+    const E = window.EXAMPLE;
+    const FOLLOW = new URLSearchParams(location.search).get('view') === 'follow';
+    const BEARING = 29; // Manhattan's grid runs ~29° east of true north: rotate so uptown is straight up
+    renderFrame({
+      legend: `<span><i style="background:var(--c-bike)"></i>Bike</span><span><i style="background:var(--c-train)"></i>Train</span>
+               <span><i style="background:var(--c-wait)"></i>Wait</span><span><i class="dash"></i>Still to ride</span>
+               <span><i style="background:var(--label3)"></i>Ruled out</span>`,
+    });
+    const mapBox = document.querySelector('.map');
+    mapBox.insertAdjacentHTML('beforeend', `
+      <div class="mode"><a href="street.html" class="${FOLLOW ? '' : 'on'}">Whole trip</a><a href="street.html?view=follow" class="${FOLLOW ? 'on' : ''}">Follow me</a></div>
+      <div class="north" title="North"><svg viewBox="0 0 24 24" style="transform:rotate(${-BEARING}deg)"><path d="M12 3 L16.5 13 H7.5 Z" fill="#ff453a"/><path d="M12 21 L7.5 13 H16.5 Z" fill="#64748b"/></svg></div>`);
+
+    const ll = (p) => [p[1], p[0]]; // [lat, lon] -> GeoJSON [lon, lat]
+    const line = (path, props) => ({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: path.map(ll) } });
+    const point = (p, props) => ({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: ll(p) } });
+    const fc = (features) => ({ type: 'FeatureCollection', features });
+    const OFF = FOLLOW ? 5 : 3.2; // px between the local (west) and express (east) tracks
+
+    // Fit points into a padded box on a ROTATED map (fitBounds fits the unrotated lat/lon box, which
+    // leaves a tall diagonal route tiny). Returns { center, zoom } for jumpTo.
+    function cameraFor(pts, bearing, pad, el) {
+      const W = el.clientWidth, H = el.clientHeight;
+      const lat0 = pts.reduce((s, p) => s + p[0], 0) / pts.length, lon0 = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      const kx = 111320 * Math.cos((lat0 * Math.PI) / 180), ky = 110540, th = (bearing * Math.PI) / 180;
+      const r = pts.map((p) => { const e = (p[1] - lon0) * kx, n = (p[0] - lat0) * ky; return [e * Math.cos(th) - n * Math.sin(th), n * Math.cos(th) + e * Math.sin(th)]; });
+      const xs = r.map((q) => q[0]), ys = r.map((q) => q[1]);
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      const aw = W - pad.left - pad.right, ah = H - pad.top - pad.bottom;
+      const mpp = Math.max((x1 - x0) / aw, (y1 - y0) / ah);
+      const cx = (x0 + x1) / 2 + (W / 2 - (pad.left + aw / 2)) * mpp;
+      const cy = (y0 + y1) / 2 - (H / 2 - (pad.top + ah / 2)) * mpp;
+      const e = cx * Math.cos(th) + cy * Math.sin(th), n = -cx * Math.sin(th) + cy * Math.cos(th);
+      const lat = lat0 + n / ky;
+      return { center: [lon0 + e / kx, lat], zoom: Math.log2((40075016.686 * Math.cos((lat * Math.PI) / 180)) / (512 * mpp)) };
+    }
+
+    try {
+      const map = new maplibregl.Map({ container: 'map', style: 'https://tiles.openfreemap.org/styles/dark', attributionControl: false, fadeDuration: 0, pitchWithRotate: false });
+      map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+
+      map.on('load', () => {
+        // Quieten the basemap so the commute is the brightest thing on screen.
+        for (const l of map.getStyle().layers) {
+          if (l.type === 'line') map.setPaintProperty(l.id, 'line-opacity', 0.5);
+          if (l.type === 'symbol') map.setPaintProperty(l.id, 'text-opacity', 0.45);
+          if (l.type === 'fill' && /water/.test(l.id)) map.setPaintProperty(l.id, 'fill-color', '#0d1726');
+          if (l.type === 'background') map.setPaintProperty(l.id, 'background-color', '#0b0d12');
+        }
+
+        const [walk, bike, local, ridden] = E.trail;
+        map.addSource('subway', { type: 'geojson', data: fc([line(E.lines.six.path, { k: 'local' }), line(E.lines.express.path, { k: 'express' })]) });
+        map.addSource('out', { type: 'geojson', data: fc([line(E.ruledOut.bikeUnion, {})]) });
+        map.addSource('trail', { type: 'geojson', data: fc([line(walk.path, { k: 'walk' }), line(bike.path, { k: 'bike' }), line(local.path, { k: 'local' }), line(ridden.path, { k: 'express' })]) });
+        map.addSource('ahead', { type: 'geojson', data: fc([line(E.ahead[0], { k: 'express' }), line(E.ahead[1], { k: 'local' })]) });
+        map.addSource('stations', { type: 'geojson', data: fc(E.stations.map((s, i) => point(s.pos, {
+          name: s.name.replace('-', '–'), express: s.express, dest: i === E.stations.length - 1 }))) });
+        map.addSource('waits', { type: 'geojson', data: fc(E.waits.map((w) => point(w.at, { label: `${w.label} ${fmt(w.sec)}`, k: w.label }))) });
+        map.addSource('dock', { type: 'geojson', data: fc([point(E.dock.pos, { label: `Citi Bike\n${E.dock.name}` })]) });
+        map.addSource('home', { type: 'geojson', data: fc([point(E.home, { label: 'Home' })]) });
+
+        const round = { 'line-cap': 'round', 'line-join': 'round' };
+        const offset = ['match', ['get', 'k'], 'express', OFF, 'local', -OFF, 0];
+        const halo = { 'text-halo-color': '#0b0d12', 'text-halo-width': 1.8 };
+        const font = ['Noto Sans Regular'];
+        // MTA Lexington Av line: 6 local on the west track, 4/5 express on the east track
+        map.addLayer({ id: 'subway-casing', type: 'line', source: 'subway', layout: round, paint: { 'line-color': '#0b0d12', 'line-width': FOLLOW ? 10 : 7, 'line-offset': offset } });
+        map.addLayer({ id: 'subway', type: 'line', source: 'subway', layout: round, paint: { 'line-color': '#00933c', 'line-width': FOLLOW ? 4.5 : 3, 'line-opacity': 0.8, 'line-offset': offset } });
+        map.addLayer({ id: 'out', type: 'line', source: 'out', layout: round, paint: { 'line-color': '#64748b', 'line-width': 2.5, 'line-opacity': 0.65, 'line-dasharray': [1.5, 2] } });
+        map.addLayer({ id: 'ahead', type: 'line', source: 'ahead', layout: round, paint: { 'line-color': '#ff5500', 'line-width': FOLLOW ? 5 : 3.5, 'line-dasharray': [1.2, 1.6], 'line-offset': offset } });
+        map.addLayer({ id: 'trail', type: 'line', source: 'trail', layout: round, filter: ['!=', ['get', 'k'], 'walk'], paint: {
+          'line-color': ['match', ['get', 'k'], 'bike', '#2ee59d', '#5b8cff'], 'line-width': FOLLOW ? 7 : 5, 'line-offset': offset } });
+        map.addLayer({ id: 'trail-walk', type: 'line', source: 'trail', layout: round, filter: ['==', ['get', 'k'], 'walk'], paint: { 'line-color': '#8a92a5', 'line-width': 3, 'line-dasharray': [1, 1.5] } });
+
+        // stations: express stops white, local stops dark (MTA convention); the destination in accent orange
+        map.addLayer({ id: 'st', type: 'circle', source: 'stations', paint: {
+          'circle-radius': ['case', ['get', 'dest'], 9, ['get', 'express'], 5.5, 3.6],
+          'circle-color': ['case', ['get', 'dest'], '#ff5500', ['get', 'express'], '#f8fafc', '#0b0d12'],
+          'circle-stroke-color': ['case', ['get', 'dest'], '#ffffff', ['get', 'express'], '#0b0d12', '#e2e8f0'],
+          'circle-stroke-width': ['case', ['get', 'dest'], 3, ['get', 'express'], 2, 1.6] } });
+        map.addLayer({ id: 'waits', type: 'circle', source: 'waits', paint: {
+          'circle-radius': 7.5, 'circle-color': ['match', ['get', 'k'], 'Transfer', '#ff7f50', '#ffb020'], 'circle-stroke-color': '#0b0d12', 'circle-stroke-width': 2 } });
+        map.addLayer({ id: 'dock', type: 'circle', source: 'dock', paint: { 'circle-radius': 7, 'circle-color': '#2ee59d', 'circle-stroke-color': '#0b0d12', 'circle-stroke-width': 2.5 } });
+        map.addLayer({ id: 'home', type: 'circle', source: 'home', paint: { 'circle-radius': 4.5, 'circle-color': '#f8fafc', 'circle-stroke-color': '#0b0d12', 'circle-stroke-width': 2 } });
+
+        // labels: stations to the left of the line, everything about YOUR trip to the right
+        map.addLayer({ id: 'st-label', type: 'symbol', source: 'stations', layout: {
+          'text-field': ['case', ['get', 'dest'], ['concat', ['get', 'name'], '\n', 'Hunter College'], ['get', 'name']], 'text-font': font,
+          'text-size': ['case', ['get', 'express'], 12, ['get', 'dest'], 12, 10.5], 'text-anchor': 'right', 'text-justify': 'right',
+          'text-offset': [-1.2, 0], 'text-allow-overlap': true, 'text-max-width': 20 },
+          paint: { 'text-color': ['case', ['get', 'dest'], '#ff8a4d', ['get', 'express'], '#f8fafc', '#a3adbf'], ...halo } });
+        map.addLayer({ id: 'waits-label', type: 'symbol', source: 'waits', layout: {
+          'text-field': ['get', 'label'], 'text-font': font, 'text-size': 11.5, 'text-anchor': 'left', 'text-offset': [1.3, 0], 'text-allow-overlap': true },
+          paint: { 'text-color': ['match', ['get', 'k'], 'Transfer', '#ff7f50', '#ffb020'], ...halo } });
+        map.addLayer({ id: 'dock-label', type: 'symbol', source: 'dock', layout: {
+          'text-field': ['get', 'label'], 'text-font': font, 'text-size': 11, 'text-anchor': 'left', 'text-justify': 'left', 'text-offset': [1.2, -0.2], 'text-allow-overlap': true, 'text-max-width': 20 },
+          paint: { 'text-color': '#2ee59d', ...halo } });
+        // Home sits 87 m from the dock: at whole-trip zoom its label would read as part of the dock's
+        if (FOLLOW) map.addLayer({ id: 'home-label', type: 'symbol', source: 'home', layout: {
+          'text-field': ['get', 'label'], 'text-font': font, 'text-size': 11, 'text-anchor': 'top', 'text-offset': [0, 0.9] },
+          paint: { 'text-color': '#f8fafc', ...halo } });
+
+        // you (solid) and your typical day's position right now (hollow ghost, 42 s behind)
+        const ghostAt = pointBack(ridden.path, E.ghostAheadSec * 12.5);
+        const el = (cls) => Object.assign(document.createElement('div'), { className: cls });
+        new maplibregl.Marker({ element: el('ghost-dot'), offset: [OFF, 0] }).setLngLat(ll(ghostAt)).addTo(map);
+        new maplibregl.Marker({ element: el('puck'), offset: [OFF, 0] }).setLngLat(ll(E.live)).addTo(map);
+
+        if (FOLLOW) {
+          // street level around you, nudged so more of what's ahead is visible (350 m up the line)
+          const ahead = pointBack(E.ahead[0], Math.max(0, pathLen(E.ahead[0]) - 350));
+          map.jumpTo({ center: ll([(E.live[0] * 2 + ahead[0]) / 3, (E.live[1] * 2 + ahead[1]) / 3]), zoom: 15.1, bearing: BEARING });
+        } else {
+          const pts = [E.home, E.dock.pos, ...E.stations.map((s) => s.pos)];
+          map.jumpTo({ ...cameraFor(pts, BEARING, { top: 100, bottom: 104, left: 150, right: 60 }, map.getContainer()), bearing: BEARING });
+        }
+        // compact attribution starts expanded; collapse it to the (i) button
+        const attrib = document.querySelector('.maplibregl-ctrl-attrib');
+        attrib?.classList.remove('maplibregl-compact-show');
+        attrib?.removeAttribute('open');
+        map.once('idle', () => { document.title += ' (ready)'; });
+      });
+    } catch (err) {
+      document.getElementById('map').innerHTML = `<div class="map-error">Map failed to start: ${err.message}</div>`;
+    }
+  </script>
+</body>
+</html>
